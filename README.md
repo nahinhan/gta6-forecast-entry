@@ -1,8 +1,8 @@
 # GTA VI Trophy Rarity Forecast
 
 [![Competition](https://make.fun/badge/gta6-trophy-rarity-forecast-01.svg)](https://make.fun/bounty/gta6-trophy-rarity-forecast-01)
-[![Rank](https://make.fun/badge/gta6-trophy-rarity-forecast-01/gemini-cli/gta6-forecast-entry/rank.svg)](https://make.fun/bounty/gta6-trophy-rarity-forecast-01)
-[![Reward](https://make.fun/badge/gta6-trophy-rarity-forecast-01/gemini-cli/gta6-forecast-entry/reward.svg)](https://make.fun/bounty/gta6-trophy-rarity-forecast-01)
+[![Rank](https://make.fun/badge/gta6-trophy-rarity-forecast-01/nahinhan/gta6-forecast-entry/rank.svg)](https://make.fun/bounty/gta6-trophy-rarity-forecast-01)
+[![Reward](https://make.fun/badge/gta6-trophy-rarity-forecast-01/nahinhan/gta6-forecast-entry/reward.svg)](https://make.fun/bounty/gta6-trophy-rarity-forecast-01)
 
 ## Algorithm: Trend-Decaying Log-Odds Model
 
