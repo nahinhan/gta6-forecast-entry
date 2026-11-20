@@ -36,34 +36,106 @@ const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95];
 /** The standard normal's quantile at each level. */
 const Z = [-1.645, -0.674, 0, 0.674, 1.645];
-/** The spread of a rate's move, in logit units per square-root day. */
-const SIGMA = 0.5;
+/** The spread of a rate's move, in logit units per square-root day. (Revision 2: 0.45) */
+const SIGMA = 0.45;
+/** Tail inflation factor for 0.05 and 0.95 quantiles. */
+const TAIL_INFLATION = 1.1;
+
+interface Trophy {
+  id: number;
+}
+
+interface HistoryEntry {
+  at: string;
+  players_tracked: number;
+  rates: Array<number | null>;
+}
 
 interface Case {
   levels: number[];
   horizon_minutes: number;
-  trophies: Array<{ id: number }>;
-  history: Array<{ rates: Array<number | null> }>;
+  at: string;
+  target: string;
+  trophies: Trophy[];
+  history: HistoryEntry[];
 }
 
 const clamp = (x: number): number => Math.min(99.99, Math.max(0.01, x));
 const logit = (pct: number): number => Math.log(clamp(pct) / (100 - clamp(pct)));
+const expit = (l: number): number => 100 / (1 + Math.exp(-l));
 /** x rounded to 4 decimals. */
 const round4 = (x: number): number => Math.round(x * 10_000) / 10_000;
 
+/** Simple linear regression: returns { alpha, beta } for y = alpha + beta * x */
+function linearRegression(x: number[], y: number[]) {
+  const n = x.length;
+  if (n < 2) return { alpha: y[0] ?? 0, beta: 0 };
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += x[i];
+    sumY += y[i];
+    sumXY += x[i] * y[i];
+    sumXX += x[i] * x[i];
+  }
+  const denominator = (n * sumXX - sumX * sumX);
+  if (Math.abs(denominator) < 1e-10) return { alpha: sumY / n, beta: 0 };
+  const beta = (n * sumXY - sumX * sumY) / denominator;
+  const alpha = (sumY - beta * sumX) / n;
+  return { alpha, beta };
+}
+
 mkdirSync(OUTPUT_DIR, { recursive: true });
-// Every case file, in name order, so two runs write the same bytes.
 const inputs = readdirSync(INPUT_DIR).filter((f) => f.endsWith('.in')).sort();
+
 for (const file of inputs) {
   const id = file.slice(0, -'.in'.length);
   const c = JSON.parse(readFileSync(join(INPUT_DIR, file), 'utf8')) as Case;
-  if (c.levels.length !== LEVELS.length || c.levels.some((t, j) => t !== LEVELS[j])) throw new Error(`${file} asks for levels ${JSON.stringify(c.levels)}, not ${JSON.stringify(LEVELS)}`);
-  const last = c.history[c.history.length - 1];
-  if (last === undefined) throw new Error(`${file} has no history`);
-  const spread = SIGMA * Math.sqrt(c.horizon_minutes / 1440);
+  
+  const startTime = new Date(c.history[0].at).getTime();
+  const times = c.history.map(h => (new Date(h.at).getTime() - startTime) / 60000);
+  const checkpointTime = (new Date(c.at).getTime() - startTime) / 60000;
+  const targetTime = (new Date(c.target).getTime() - startTime) / 60000;
+  const horizon = targetTime - checkpointTime;
+
+  const spreadBase = SIGMA * Math.sqrt(c.horizon_minutes / 1440);
+  
   const trophies = c.trophies.map((t, i) => {
-    const l = logit(last.rates[i] ?? 0);
-    return { id: t.id, q: Z.map((z) => round4(100 / (1 + Math.exp(-(l + z * spread))))) };
+    const historyRates = c.history.map(h => h.rates[i]).filter(r => r !== null) as number[];
+    const historyTimes = c.history.filter((h, idx) => h.rates[i] !== null).map((h, idx) => times[idx]);
+    
+    let targetLogit: number;
+    const lastRate = historyRates[historyRates.length - 1] ?? 0.01;
+    const lastLogit = logit(lastRate);
+
+    if (historyRates.length >= 2) {
+      const logits = historyRates.map(r => logit(r));
+      const model = linearRegression(historyTimes, logits);
+      
+      // Trend decay and capping: don't let the trend go wild for the 1-week horizon.
+      // We decay the trend over time.
+      const decay = Math.exp(-horizon / 5000); 
+      const adjustedBeta = model.beta * decay;
+      
+      // Limit total trend move to 2.0 logit units (~1 order of magnitude)
+      const trendMove = Math.max(-2.0, Math.min(2.0, adjustedBeta * horizon));
+      targetLogit = lastLogit + trendMove;
+    } else {
+      targetLogit = lastLogit;
+    }
+
+    const q = Z.map((z, idx) => {
+      let spread = spreadBase;
+      if (idx === 0 || idx === 4) spread *= TAIL_INFLATION;
+      return round4(expit(targetLogit + z * spread));
+    });
+
+    // Ensure non-decreasing
+    for (let j = 1; j < q.length; j++) {
+      if (q[j] < q[j-1]) q[j] = q[j-1];
+    }
+
+    return { id: t.id, q };
   });
+
   writeFileSync(join(OUTPUT_DIR, `${id}.out`), `${JSON.stringify({ trophies })}\n`);
 }
